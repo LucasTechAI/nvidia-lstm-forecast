@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
         show_statistics(df)
         logger.info("=" * 60)
-        save_data(df, "nvidia_stock_max.csv")
+        save_data(df, "nvidia_stock.csv")
         logger.info("=" * 60)
     else:
         logger.error("Data extraction failed.")

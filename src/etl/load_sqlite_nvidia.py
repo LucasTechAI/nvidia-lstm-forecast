@@ -5,7 +5,7 @@ from os import path
 
 
 CSV_PATH = path.abspath(
-    path.join(path.dirname(__file__), "../../data/raw/nvidia_stock_max.csv")
+    path.join(path.dirname(__file__), "../../data/raw/nvidia_stock.csv")
 )
 DB_PATH = path.abspath(path.join(path.dirname(__file__), "../../data/nvidia_stock.db"))
 TABLE_NAME = "nvidia_stock"
