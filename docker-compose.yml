@@ -1,22 +1,57 @@
 services:
+  # MLflow tracking server
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nvidia-lstm-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+      - ./models:/app/models
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=file:///app/mlruns
+    command: ["mlflow", "ui", "--host", "0.0.0.0", "--port", "5000"]
+    restart: unless-stopped
+
+  # ETL service
   etl:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: nvidia-lstm-etl
     volumes:
-      # Persist data directory (SQLite DB and CSV files)
       - ./data:/app/data
-      # Persist logs
       - ./logs:/app/logs
-      # Persist trained models
-      - ./models:/app/models
     environment:
       - DATABASE_PATH=/app/data/nvidia.db
       - LOG_LEVEL=INFO
-    # Network access required for Yahoo Finance API
+    command: ["python", "setup/run_etl_nvidia.py"]
     network_mode: bridge
     restart: "no"
+
+  # Training service
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nvidia-lstm-training
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./mlruns:/app/mlruns
+      - ./outputs:/app/outputs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia.db
+      - LOG_LEVEL=INFO
+      - MLFLOW_TRACKING_URI=/app/mlruns
+      - PYTHONPATH=/app
+    depends_on:
+      - etl
+    profiles:
+      - training
 
   # Development service with source code mounted
   dev:
@@ -28,13 +63,17 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./models:/app/models
-      # Mount source code for development
+      - ./mlruns:/app/mlruns
+      - ./outputs:/app/outputs
       - ./src:/app/src
       - ./setup:/app/setup
       - ./tests:/app/tests
+      - ./scripts:/app/scripts
     environment:
       - DATABASE_PATH=/app/data/nvidia.db
       - LOG_LEVEL=DEBUG
+      - MLFLOW_TRACKING_URI=/app/mlruns
+      - PYTHONPATH=/app
     command: ["bash"]
     stdin_open: true
     tty: true

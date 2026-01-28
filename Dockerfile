@@ -1,7 +1,7 @@
 # Dockerfile for nvidia-lstm-forecast
-# Python 3.12 slim image for smaller footprint
+# Python 3.10 slim image for PyTorch compatibility
 
-FROM python:3.12-slim
+FROM python:3.10-slim
 
 # Set working directory
 WORKDIR /app
@@ -10,11 +10,14 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
 
-# Install system dependencies (if needed for data science packages)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files first (better layer caching)
@@ -27,7 +30,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data/raw logs models
+RUN mkdir -p data logs models mlruns outputs
+
+# Expose MLflow port
+EXPOSE 5000
 
 # Default command - run ETL pipeline
 CMD ["python", "setup/run_etl_nvidia.py"]
