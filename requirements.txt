@@ -4,12 +4,16 @@ pandas==2.0.0
 numpy==1.24.0
 python-dotenv==1.0.1
 
-# Deep Learning
-torch==2.0.0
+# Deep Learning - Updated for security patches
+torch>=2.6.0
 scikit-learn==1.4.0
 
-# Experiment Tracking
-mlflow==2.10.0
+# Experiment Tracking - Updated to fix multiple vulnerabilities:
+# - DNS rebinding attacks (CVE requires >= 3.5.0)
+# - Directory traversal RCE (requires >= 2.22.4)
+# - Unsafe deserialization (requires >= 3.5.0)
+# - Local file inclusion (requires >= 2.11.3)
+mlflow>=3.5.0
 
 # Hyperparameter Optimization
 optuna==3.5.0

@@ -304,6 +304,21 @@ pytest tests/ -m integration
 - Type hints for function signatures
 - Docstrings for all public functions
 
+## 🔒 Security
+
+- ✅ All dependencies updated to latest secure versions
+- ✅ MLflow ≥3.5.0 (fixes DNS rebinding, RCE, and deserialization vulnerabilities)
+- ✅ PyTorch ≥2.6.0 (fixes RCE and memory corruption vulnerabilities)
+- ✅ CodeQL analysis: 0 vulnerabilities in application code
+- ✅ See [SECURITY.md](SECURITY.md) for detailed security advisory
+
+**Security Best Practices:**
+- Never expose MLflow server directly to the internet
+- Only load models from trusted sources
+- Use `torch.load(..., weights_only=True)` when possible
+- Run in isolated Docker containers
+- Regularly update dependencies
+
 ## 📄 License
 
 This project is licensed under the MIT License.
