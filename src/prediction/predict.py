@@ -232,25 +232,24 @@ def save_predictions_to_csv(
 
 def calculate_prediction_intervals(
     predictions: np.ndarray,
-    confidence_level: float = 0.95
+    confidence_level: float = 0.95,
+    uncertainty_factor: float = 0.10
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate prediction intervals (simplified approach).
     
-    Note: This is a simplified implementation. For more accurate intervals,
-    consider using methods like bootstrapping or Monte Carlo dropout.
+    Note: This is a simplified implementation using a fixed uncertainty factor.
+    For more accurate intervals, consider using methods like bootstrapping,
+    Monte Carlo dropout, or model ensembles.
     
     Args:
         predictions: Array of predictions
         confidence_level: Confidence level for intervals
+        uncertainty_factor: Proportion of prediction used as uncertainty (default: 0.10 for 10%)
         
     Returns:
         Tuple of (lower_bound, upper_bound)
     """
-    # Simple approach: use a percentage of the prediction as uncertainty
-    # This is a placeholder - ideally use model uncertainty
-    uncertainty_factor = 0.1  # 10% uncertainty
-    
     std = predictions * uncertainty_factor
     
     # Calculate z-score for confidence level

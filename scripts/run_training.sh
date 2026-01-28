@@ -5,8 +5,12 @@ set -e
 
 echo "Starting LSTM model training..."
 
+# Get the script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Set environment variables
-export PYTHONPATH="${PYTHONPATH}:/home/runner/work/nvidia-lstm-forecast/nvidia-lstm-forecast"
+export PYTHONPATH="${PYTHONPATH}:${PROJECT_ROOT}"
 
 # Run training script
 python3 -c "
@@ -17,7 +21,7 @@ from pathlib import Path
 import sys
 
 # Add src to path
-sys.path.insert(0, '/home/runner/work/nvidia-lstm-forecast/nvidia-lstm-forecast')
+sys.path.insert(0, '${PROJECT_ROOT}')
 
 from src.config import settings
 from src.data.preprocessing import (

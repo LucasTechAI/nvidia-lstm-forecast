@@ -117,9 +117,10 @@ def objective(
             return best_val_rmse
             
         except Exception as e:
-            logger.error(f"Trial {trial.number} failed: {str(e)}")
-            # Return a large value to indicate failure
-            return float('inf')
+            logger.error(f"Trial {trial.number} failed with error: {str(e)}", exc_info=True)
+            # Report failed trial to Optuna
+            # This allows Optuna to continue with other trials
+            raise optuna.TrialPruned(f"Training failed: {str(e)}")
 
 
 def run_hyperparameter_search(

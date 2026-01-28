@@ -53,12 +53,13 @@ def train_epoch(
         optimizer.zero_grad()
         outputs = model(batch_x)
         
-        # Handle output shape - ensure it matches target shape
+        # Ensure output shape matches target shape
+        # This should not happen if model is configured correctly
         if outputs.shape != batch_y.shape:
-            # If model outputs (batch, 1) and target is (batch, n_features)
-            # repeat the output
-            if outputs.shape[1] == 1 and batch_y.shape[1] > 1:
-                outputs = outputs.repeat(1, batch_y.shape[1])
+            raise ValueError(
+                f"Model output shape {outputs.shape} does not match target shape {batch_y.shape}. "
+                f"Please check model output_size configuration."
+            )
         
         loss = criterion(outputs, batch_y)
         
@@ -109,10 +110,12 @@ def validate_epoch(
             # Forward pass
             outputs = model(batch_x)
             
-            # Handle output shape
+            # Ensure output shape matches target shape
             if outputs.shape != batch_y.shape:
-                if outputs.shape[1] == 1 and batch_y.shape[1] > 1:
-                    outputs = outputs.repeat(1, batch_y.shape[1])
+                raise ValueError(
+                    f"Model output shape {outputs.shape} does not match target shape {batch_y.shape}. "
+                    f"Please check model output_size configuration."
+                )
             
             loss = criterion(outputs, batch_y)
             
@@ -135,9 +138,14 @@ def validate_epoch(
     # MAE
     mae = np.mean(np.abs(predictions - targets))
     
-    # MAPE (avoid division by zero)
-    epsilon = 1e-10
-    mape = np.mean(np.abs((targets - predictions) / (targets + epsilon))) * 100
+    # MAPE (with threshold to handle near-zero values)
+    # Only calculate MAPE for values above threshold
+    threshold = 1e-3
+    mask = np.abs(targets) > threshold
+    if mask.any():
+        mape = np.mean(np.abs((targets[mask] - predictions[mask]) / targets[mask])) * 100
+    else:
+        mape = 0.0  # If all values near zero, set MAPE to 0
     
     metrics = {
         'rmse': rmse,

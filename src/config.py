@@ -80,6 +80,7 @@ MLFLOW_ARTIFACT_LOCATION = os.getenv("MLFLOW_ARTIFACT_LOCATION", None)
 
 # Prediction
 FORECAST_HORIZON = 30
+PREDICTION_UNCERTAINTY_FACTOR = 0.10  # 10% uncertainty for confidence intervals
 
 # Model and Output Directories
 MODEL_DIR = ROOT_DIR / "models"
@@ -147,6 +148,7 @@ class Settings:
     
     # Prediction
     forecast_horizon: int = FORECAST_HORIZON
+    prediction_uncertainty_factor: float = PREDICTION_UNCERTAINTY_FACTOR
     
     @classmethod
     def from_env(cls) -> "Settings":
