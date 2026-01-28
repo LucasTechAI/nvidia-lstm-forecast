@@ -40,20 +40,26 @@ venv.bak/
 # VS Code
 .vscode/
 
-# Data files
+# Data files (but not src/data directory)
 *.csv
 *.h5
 *.hdf5
-*.pkl
-*.pickle
-data/
+data/*.db
+data/*.sqlite
+data/*.csv
+data/raw/
+data/processed/
 datasets/
 
-# Model files
+# Model artifacts (but not src/models directory)
 *.pth
 *.pt
 *.ckpt
-models/
+*.pkl
+*.pickle
+models/*.pth
+models/*.pt
+models/*.pkl
 checkpoints/
 
 # Logs
