@@ -1,15 +1,12 @@
-from pathlib import Path
-from yfinance import Ticker
+from src.config import ROOT_DIR, LOG_FORMAT, LOG_LEVEL
+from logging import getLogger, basicConfig
 from pandas import DataFrame
-from os import path, makedirs
+from yfinance import Ticker
+from pathlib import Path
 
-from logging import getLogger, basicConfig, INFO
-
-
-basicConfig(level=INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 logger = getLogger(__name__)
 
-ROOT_DIR = path.abspath(path.join(path.dirname(__file__), "..", ".."))
 logger.info(f"ROOT_DIR: {ROOT_DIR}")
 
 
