@@ -1,0 +1,42 @@
+services:
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nvidia-lstm-etl
+    volumes:
+      # Persist data directory (SQLite DB and CSV files)
+      - ./data:/app/data
+      # Persist logs
+      - ./logs:/app/logs
+      # Persist trained models
+      - ./models:/app/models
+    environment:
+      - DATABASE_PATH=/app/data/nvidia.db
+      - LOG_LEVEL=INFO
+    # Network access required for Yahoo Finance API
+    network_mode: bridge
+    restart: "no"
+
+  # Development service with source code mounted
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nvidia-lstm-dev
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      # Mount source code for development
+      - ./src:/app/src
+      - ./setup:/app/setup
+      - ./tests:/app/tests
+    environment:
+      - DATABASE_PATH=/app/data/nvidia.db
+      - LOG_LEVEL=DEBUG
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev
