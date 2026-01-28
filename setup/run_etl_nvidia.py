@@ -1,11 +1,17 @@
+"""ETL runner script for NVIDIA stock data extraction."""
+
+import os
+import sys
 from logging import getLogger, basicConfig, INFO
-import os, sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 basicConfig(level=INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = getLogger(__name__)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.etl.extrator_nvidia import extract_nvidia_data, save_data, show_statistics
+from src.etl.extractor_nvidia import extract_nvidia_data, save_data, show_statistics
 from src.etl.load_sqlite_nvidia import load_csv_to_sqlite
 
 if __name__ == "__main__":
