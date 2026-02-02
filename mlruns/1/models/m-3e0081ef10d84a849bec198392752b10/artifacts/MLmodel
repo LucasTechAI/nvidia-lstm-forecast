@@ -1,0 +1,23 @@
+artifact_path: /home/lucas/nvidia-lstm-forecast/mlruns/1/models/m-3e0081ef10d84a849bec198392752b10/artifacts
+flavors:
+  python_function:
+    config:
+      device: null
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pytorch
+    pickle_module_name: mlflow.pytorch.pickle_module
+    python_version: 3.12.3
+  pytorch:
+    code: null
+    model_data: data
+    pytorch_version: 2.10.0+cu128
+mlflow_version: 3.8.1
+model_id: m-3e0081ef10d84a849bec198392752b10
+model_size_bytes: 802305
+model_uuid: m-3e0081ef10d84a849bec198392752b10
+prompts: null
+run_id: ee17873ae3354481926bf70ac77130ef
+utc_time_created: '2026-02-02 22:55:58.421733'

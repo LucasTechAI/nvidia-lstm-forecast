@@ -1,42 +1,256 @@
+# =============================================================================
+# Docker Compose for NVIDIA LSTM Stock Forecast
+# =============================================================================
+# Services:
+#   - mlflow: MLflow tracking server (UI on port 5000)
+#   - training: Model training service
+#   - hpo: Hyperparameter optimization service
+#   - prediction: Forecast generation service
+#   - etl: Data extraction service (original)
+#   - dev: Development environment
+# =============================================================================
+
 services:
+  # ===========================================================================
+  # MLflow Tracking Server
+  # ===========================================================================
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mlflow-server
+    container_name: nvidia-lstm-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data/mlruns:/app/mlruns
+      - ./data/models:/app/models
+    environment:
+      - MLFLOW_TRACKING_URI=sqlite:///mlruns/mlflow.db
+    networks:
+      - lstm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # Model Training Service
+  # ===========================================================================
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: nvidia-lstm-training
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      - mlflow
+    networks:
+      - lstm-network
+    command: ["python", "-m", "src.training.train"]
+    profiles:
+      - training
+
+  # ===========================================================================
+  # Hyperparameter Optimization Service
+  # ===========================================================================
+  hpo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: nvidia-lstm-hpo
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      - mlflow
+    networks:
+      - lstm-network
+    command: ["python", "-m", "src.training.hyperparameter_search", "--n-trials", "50"]
+    profiles:
+      - hpo
+
+  # ===========================================================================
+  # Prediction Service
+  # ===========================================================================
+  prediction:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: nvidia-lstm-prediction
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      - mlflow
+    networks:
+      - lstm-network
+    command: ["python", "-m", "src.prediction.predict", "--horizon", "30"]
+    profiles:
+      - prediction
+
+  # ===========================================================================
+  # ETL Pipeline Service (Original)
+  # ===========================================================================
   etl:
     build:
       context: .
       dockerfile: Dockerfile
+      target: production
     container_name: nvidia-lstm-etl
     volumes:
-      # Persist data directory (SQLite DB and CSV files)
       - ./data:/app/data
-      # Persist logs
       - ./logs:/app/logs
-      # Persist trained models
-      - ./models:/app/models
     environment:
-      - DATABASE_PATH=/app/data/nvidia.db
+      - DATABASE_PATH=/app/data/nvidia_stock.db
       - LOG_LEVEL=INFO
-    # Network access required for Yahoo Finance API
-    network_mode: bridge
+    networks:
+      - lstm-network
+    command: ["python", "setup/run_etl_nvidia.py"]
     restart: "no"
 
-  # Development service with source code mounted
+  # ===========================================================================
+  # FastAPI Server
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-server
+    container_name: nvidia-lstm-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MODEL_CHECKPOINT_PATH=/app/data/models/checkpoints/best_model.pt
+      - SCALER_PATH=/app/data/outputs/artifacts/5747312b7a014d5b9cf58802018fe5b0/scaler.joblib
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+      - WORKERS=4
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    networks:
+      - lstm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ===========================================================================
+  # FastAPI Server with GPU Support
+  # ===========================================================================
+  api-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-gpu
+    container_name: nvidia-lstm-api-gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MODEL_CHECKPOINT_PATH=/app/data/models/checkpoints/best_model.pt
+      - SCALER_PATH=/app/data/outputs/artifacts/5747312b7a014d5b9cf58802018fe5b0/scaler.joblib
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    networks:
+      - lstm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    profiles:
+      - gpu
+
+  # ===========================================================================
+  # Development Environment
+  # ===========================================================================
   dev:
     build:
       context: .
       dockerfile: Dockerfile
+      target: development
     container_name: nvidia-lstm-dev
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./models:/app/models
-      # Mount source code for development
+      # Mount source code for hot-reloading
       - ./src:/app/src
-      - ./setup:/app/setup
       - ./tests:/app/tests
+      - ./scripts:/app/scripts
     environment:
-      - DATABASE_PATH=/app/data/nvidia.db
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
       - LOG_LEVEL=DEBUG
+      - PYTHONPATH=/app
+    depends_on:
+      - mlflow
+    networks:
+      - lstm-network
     command: ["bash"]
     stdin_open: true
     tty: true
     profiles:
       - dev
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  lstm-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes (Optional: for persistent data)
+# =============================================================================
+volumes:
+  mlruns-data:
+  model-data:

@@ -46,15 +46,18 @@ venv.bak/
 *.hdf5
 *.pkl
 *.pickle
-data/
-datasets/
+
+# Keep data directory structure but ignore large files
+data/models/
+data/outputs/
+data/mlruns/
+!data/raw/
+!data/nvidia_stock.db
 
 # Model files
 *.pth
 *.pt
 *.ckpt
-models/
-checkpoints/
 
 # Logs
 *.log
