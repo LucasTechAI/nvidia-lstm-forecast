@@ -1,0 +1,84 @@
+# =============================================================================
+# Dockerfile.api - Optimized FastAPI Server for NVIDIA LSTM Forecast
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder - Install dependencies
+# -----------------------------------------------------------------------------
+FROM python:3.10-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first (better caching)
+COPY requirements.txt .
+
+# Create virtual environment and install dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime - Minimal production image
+# -----------------------------------------------------------------------------
+FROM python:3.10-slim AS runtime
+
+# Labels
+LABEL maintainer="NVIDIA LSTM Forecast Team"
+LABEL version="1.0.0"
+LABEL description="FastAPI server for NVIDIA stock price prediction"
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH" \
+    # API Configuration
+    API_HOST=0.0.0.0 \
+    API_PORT=8000 \
+    API_WORKERS=4 \
+    # Model paths
+    MODEL_CHECKPOINT_PATH=/app/data/models/checkpoints/best_model.pt \
+    DATABASE_PATH=/app/data/nvidia_stock.db \
+    # Logging
+    LOG_LEVEL=INFO
+
+WORKDIR /app
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash appuser
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code
+COPY src/ ./src/
+COPY api/ ./api/
+
+# Create necessary directories
+RUN mkdir -p data/raw data/models/checkpoints data/outputs data/mlruns logs \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose API port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:${API_PORT}/health || exit 1
+
+# Run API with uvicorn
+CMD ["sh", "-c", "uvicorn api.main:app --host ${API_HOST} --port ${API_PORT} --workers ${API_WORKERS}"]

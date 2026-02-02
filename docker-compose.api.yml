@@ -1,0 +1,107 @@
+# =============================================================================
+# Docker Compose - API Production Stack
+# =============================================================================
+# Usage:
+#   docker-compose -f docker-compose.api.yml up -d
+#   docker-compose -f docker-compose.api.yml up -d --scale api=3  # Scale API
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # FastAPI Server (Production)
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: nvidia-lstm-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount data (read-only for safety, includes models, outputs, mlruns)
+      - ./data:/app/data:ro
+      # Logs (read-write)
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MODEL_CHECKPOINT_PATH=/app/data/models/checkpoints/best_model.pt
+      - SCALER_PATH=/app/data/outputs/artifacts/5747312b7a014d5b9cf58802018fe5b0/scaler.joblib
+      - LOG_LEVEL=INFO
+      - API_WORKERS=4
+    networks:
+      - api-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ===========================================================================
+  # Nginx Load Balancer (Optional)
+  # ===========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: nvidia-lstm-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - api-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+  # ===========================================================================
+  # MLflow Server (for model registry)
+  # ===========================================================================
+  mlflow:
+    image: python:3.10-slim
+    container_name: nvidia-lstm-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data/mlruns:/mlruns
+    command: >
+      sh -c "pip install mlflow && 
+             mlflow server 
+             --backend-store-uri sqlite:///mlruns/mlflow.db 
+             --default-artifact-root /mlruns 
+             --host 0.0.0.0 
+             --port 5000"
+    networks:
+      - api-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - full
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  api-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  logs-data:
