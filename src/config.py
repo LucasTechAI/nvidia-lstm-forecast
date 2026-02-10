@@ -58,109 +58,48 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
 # ============================================================================
-# Data Processing Configuration
+# Model Configuration
 # ============================================================================
 
-@dataclass
-class DataConfig:
-    """Configuration for data loading and preprocessing."""
-    
-    # Data filtering
-    start_year: int = 2017
-    
-    # Train/Val/Test split ratios (must sum to 1.0)
-    train_split: float = 0.7
-    val_split: float = 0.15
-    test_split: float = 0.15
-    
-    # Target column for prediction (lowercase to match database)
-    target_column: str = "close"
-    
-    # Feature columns to use (None = use only target)
-    feature_columns: Optional[List[str]] = None
-    
-    # Scaler type for normalization
-    scaler_type: str = "MinMaxScaler"  # Options: "MinMaxScaler", "StandardScaler"
-    
-    def __post_init__(self):
-        """Validate configuration after initialization."""
-        assert abs(self.train_split + self.val_split + self.test_split - 1.0) < 1e-6, \
-            "Train, val, and test splits must sum to 1.0"
+# Data Parameters
+DATA_START_YEAR = 2017
+TRAIN_SPLIT = 0.7
+VAL_SPLIT = 0.15
+TEST_SPLIT = 0.15
+TARGET_COLUMN = "Close"
 
+# LSTM Architecture
+SEQUENCE_LENGTH = 60
+HIDDEN_SIZE = 128
+NUM_LAYERS = 2
+DROPOUT = 0.2
+BIDIRECTIONAL = False
 
-# ============================================================================
-# LSTM Model Configuration
-# ============================================================================
+# Training Parameters
+BATCH_SIZE = 32
+EPOCHS = 100
+LEARNING_RATE = 0.001
+OPTIMIZER = "Adam"
+LOSS_FUNCTION = "MSE"
+EARLY_STOPPING_PATIENCE = 10
 
-@dataclass
-class LSTMConfig:
-    """Configuration for LSTM model architecture."""
-    
-    # Sequence parameters
-    sequence_length: int = 60  # Number of days to look back
-    
-    # Architecture
-    input_size: int = 1  # Number of input features
-    hidden_size: int = 128  # LSTM hidden state size
-    num_layers: int = 2  # Number of stacked LSTM layers
-    dropout: float = 0.2  # Dropout probability between layers
-    bidirectional: bool = False  # Use bidirectional LSTM
-    
-    # Output
-    output_size: int = 1  # Number of output features (predict Close price)
-    
-    @property
-    def num_directions(self) -> int:
-        """Get number of directions (1 for unidirectional, 2 for bidirectional)."""
-        return 2 if self.bidirectional else 1
-
-
-# ============================================================================
-# Training Configuration
-# ============================================================================
-
-@dataclass
-class TrainingConfig:
-    """Configuration for model training."""
-    
-    # Training parameters
-    batch_size: int = 32
-    epochs: int = 100
-    learning_rate: float = 0.001
-    
-    # Optimizer
-    optimizer: str = "Adam"  # Options: "Adam", "AdamW", "SGD", "RMSprop"
-    weight_decay: float = 1e-5  # L2 regularization
-    
-    # Loss function
-    loss_function: str = "MSE"  # Options: "MSE", "MAE", "Huber"
-    
-    # Early stopping
-    early_stopping_patience: int = 10
-    early_stopping_min_delta: float = 1e-6
-    
-    # Learning rate scheduler
-    use_scheduler: bool = True
-    scheduler_type: str = "ReduceLROnPlateau"  # Options: "ReduceLROnPlateau", "StepLR", "CosineAnnealing"
-    scheduler_patience: int = 5
-    scheduler_factor: float = 0.5
-    
-    # Gradient clipping
-    gradient_clip_value: Optional[float] = 1.0
-    
-    # Checkpointing
-    save_best_only: bool = True
-    checkpoint_dir: Path = field(default_factory=lambda: MODELS_DIR / "checkpoints")
-    
-    # Random seed for reproducibility
-    random_seed: int = 42
-    
-    # Device
-    device: str = "auto"  # Options: "auto", "cuda", "cpu"
-
-
-# ============================================================================
 # MLflow Configuration
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", str(ROOT_DIR / "mlruns"))
+MLFLOW_EXPERIMENT_NAME = "nvidia-lstm-forecast"
+MLFLOW_ARTIFACT_LOCATION = os.getenv("MLFLOW_ARTIFACT_LOCATION", None)
+
+# Prediction
+FORECAST_HORIZON = 30
+PREDICTION_UNCERTAINTY_FACTOR = 0.10  # 10% uncertainty for confidence intervals
+
+# Model and Output Directories
+MODEL_DIR = ROOT_DIR / "models"
+OUTPUT_DIR = ROOT_DIR / "outputs"
+MLRUNS_DIR = ROOT_DIR / "mlruns"
+
+
+# ============================================================================
+# Settings Class (Pydantic-style for validation)
 # ============================================================================
 
 @dataclass
@@ -265,9 +204,9 @@ class Settings:
     # Paths
     root_dir: Path = ROOT_DIR
     data_dir: Path = DATA_DIR
-    models_dir: Path = MODELS_DIR
-    logs_dir: Path = LOGS_DIR
-    outputs_dir: Path = OUTPUTS_DIR
+    model_dir: Path = MODEL_DIR
+    output_dir: Path = OUTPUT_DIR
+    mlruns_dir: Path = MLRUNS_DIR
     
     # Database
     database_path: str = DATABASE_PATH
@@ -281,13 +220,36 @@ class Settings:
     log_level: str = LOG_LEVEL
     log_format: str = LOG_FORMAT
     
-    # Sub-configurations
-    data: DataConfig = field(default_factory=DataConfig)
-    lstm: LSTMConfig = field(default_factory=LSTMConfig)
-    training: TrainingConfig = field(default_factory=TrainingConfig)
-    mlflow: MLflowConfig = field(default_factory=MLflowConfig)
-    hpo: HPOConfig = field(default_factory=HPOConfig)
-    prediction: PredictionConfig = field(default_factory=PredictionConfig)
+    # Data Parameters
+    data_start_year: int = DATA_START_YEAR
+    train_split: float = TRAIN_SPLIT
+    val_split: float = VAL_SPLIT
+    test_split: float = TEST_SPLIT
+    target_column: str = TARGET_COLUMN
+    
+    # LSTM Architecture
+    sequence_length: int = SEQUENCE_LENGTH
+    hidden_size: int = HIDDEN_SIZE
+    num_layers: int = NUM_LAYERS
+    dropout: float = DROPOUT
+    bidirectional: bool = BIDIRECTIONAL
+    
+    # Training
+    batch_size: int = BATCH_SIZE
+    epochs: int = EPOCHS
+    learning_rate: float = LEARNING_RATE
+    optimizer: str = OPTIMIZER
+    loss_function: str = LOSS_FUNCTION
+    early_stopping_patience: int = EARLY_STOPPING_PATIENCE
+    
+    # MLflow
+    mlflow_tracking_uri: str = MLFLOW_TRACKING_URI
+    mlflow_experiment_name: str = MLFLOW_EXPERIMENT_NAME
+    mlflow_artifact_location: str = MLFLOW_ARTIFACT_LOCATION
+    
+    # Prediction
+    forecast_horizon: int = FORECAST_HORIZON
+    prediction_uncertainty_factor: float = PREDICTION_UNCERTAINTY_FACTOR
     
     @classmethod
     def from_env(cls) -> "Settings":

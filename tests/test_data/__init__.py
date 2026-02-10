@@ -1,1 +1,1 @@
-"""Tests for the data module."""
+"""Tests for data module."""

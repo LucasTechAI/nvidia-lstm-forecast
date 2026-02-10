@@ -1,176 +1,137 @@
-"""
-Tests for the data preprocessing module.
-"""
+"""Tests for data preprocessing module."""
 
-import pytest
 import numpy as np
 import pandas as pd
-import torch
+import pytest
+from pathlib import Path
+import tempfile
 
-from etl.preprocessing import (
-    StockDataset,
-    create_sequences,
-    train_val_test_split,
+from src.data.preprocessing import (
     normalize_features,
+    create_sequences,
+    train_val_test_split
 )
 
 
-class TestStockDataset:
-    """Test cases for StockDataset class."""
+class TestNormalizeFeatures:
+    """Test cases for feature normalization."""
     
-    def test_dataset_initialization(self):
-        """Test dataset initialization."""
-        sequences = np.random.randn(100, 60, 1).astype(np.float32)
-        targets = np.random.randn(100).astype(np.float32)
+    def test_normalize_basic(self):
+        """Test basic normalization."""
+        df = pd.DataFrame({
+            'A': [1, 2, 3, 4, 5],
+            'B': [10, 20, 30, 40, 50]
+        })
         
-        dataset = StockDataset(sequences, targets)
+        normalized, scaler = normalize_features(df, ['A', 'B'])
         
-        assert len(dataset) == 100
+        assert normalized.shape == (5, 2)
+        assert normalized.min() >= 0
+        assert normalized.max() <= 1
     
-    def test_dataset_getitem(self):
-        """Test dataset __getitem__ method."""
-        sequences = np.random.randn(100, 60, 1).astype(np.float32)
-        targets = np.random.randn(100).astype(np.float32)
+    def test_normalize_range(self):
+        """Test normalization range."""
+        df = pd.DataFrame({
+            'Feature': [0, 50, 100]
+        })
         
-        dataset = StockDataset(sequences, targets)
-        seq, target = dataset[0]
+        normalized, scaler = normalize_features(df, ['Feature'])
         
-        assert isinstance(seq, torch.Tensor)
-        assert isinstance(target, torch.Tensor)
-        assert seq.shape == (60, 1)
-        assert target.shape == (1,)
+        assert normalized[0, 0] == 0.0
+        assert normalized[2, 0] == 1.0
+        assert 0 <= normalized[1, 0] <= 1
     
-    def test_dataset_target_shape_2d(self):
-        """Test dataset with 2D targets."""
-        sequences = np.random.randn(50, 30, 2).astype(np.float32)
-        targets = np.random.randn(50, 1).astype(np.float32)
+    def test_normalize_saves_scaler(self):
+        """Test that scaler is saved to file."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
         
-        dataset = StockDataset(sequences, targets)
-        _, target = dataset[0]
+        with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as f:
+            scaler_path = f.name
         
-        assert target.shape == (1,)
+        try:
+            normalized, scaler = normalize_features(df, ['A'], scaler_path=scaler_path)
+            assert Path(scaler_path).exists()
+        finally:
+            Path(scaler_path).unlink(missing_ok=True)
 
 
 class TestCreateSequences:
-    """Test cases for create_sequences function."""
+    """Test cases for sequence creation."""
     
-    def test_create_sequences_basic(self):
-        """Test basic sequence creation."""
-        data = np.random.randn(100, 1).astype(np.float32)
+    def test_create_sequences_shape(self):
+        """Test sequence creation output shape."""
+        data = np.random.randn(100, 3)
         sequence_length = 10
         
         X, y = create_sequences(data, sequence_length)
         
-        assert X.shape == (90, 10, 1)
-        assert y.shape == (90, 1)
-    
-    def test_create_sequences_multivariate(self):
-        """Test sequence creation with multiple features."""
-        data = np.random.randn(100, 3).astype(np.float32)
-        sequence_length = 20
-        
-        X, y = create_sequences(data, sequence_length)
-        
-        assert X.shape == (80, 20, 3)
-        assert y.shape == (80, 1)
+        # 100 - 10 - 1 + 1 = 90 sequences
+        assert X.shape == (90, 10, 3)
+        assert y.shape == (90, 3)
     
     def test_create_sequences_values(self):
-        """Test that sequence values are correct."""
-        data = np.arange(20).reshape(-1, 1).astype(np.float32)
+        """Test sequence creation maintains data order."""
+        data = np.arange(20).reshape(20, 1)
         sequence_length = 5
         
         X, y = create_sequences(data, sequence_length)
         
-        # First sequence should be [0, 1, 2, 3, 4], target = 5
-        np.testing.assert_array_equal(X[0, :, 0], [0, 1, 2, 3, 4])
+        # First sequence should be [0,1,2,3,4], target [5]
+        assert np.array_equal(X[0], [[0], [1], [2], [3], [4]])
         assert y[0, 0] == 5
-        
-        # Second sequence should be [1, 2, 3, 4, 5], target = 6
-        np.testing.assert_array_equal(X[1, :, 0], [1, 2, 3, 4, 5])
-        assert y[1, 0] == 6
     
-    def test_create_sequences_too_short(self):
-        """Test that short data raises error."""
-        data = np.random.randn(10, 1).astype(np.float32)
-        sequence_length = 15
+    def test_create_sequences_with_horizon(self):
+        """Test sequence creation with forecast horizon."""
+        data = np.arange(20).reshape(20, 1)
+        sequence_length = 5
+        horizon = 3
         
-        with pytest.raises(ValueError):
-            create_sequences(data, sequence_length)
+        X, y = create_sequences(data, sequence_length, forecast_horizon=horizon)
+        
+        # First sequence [0,1,2,3,4], target should be index 5+3-1=7
+        assert X[0][-1, 0] == 4
+        assert y[0, 0] == 7
 
 
 class TestTrainValTestSplit:
-    """Test cases for train_val_test_split function."""
+    """Test cases for data splitting."""
     
-    def test_split_ratios(self):
-        """Test that split ratios are respected."""
-        X = np.random.randn(100, 60, 1)
-        y = np.random.randn(100, 1)
+    def test_split_sizes(self):
+        """Test split produces correct sizes."""
+        X = np.random.randn(100, 10, 5)
+        y = np.random.randn(100, 5)
         
-        splits = train_val_test_split(X, y, 0.7, 0.15, 0.15)
+        X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
+            X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15
+        )
         
-        assert len(splits['train'][0]) == 70
-        assert len(splits['val'][0]) == 15
-        assert len(splits['test'][0]) == 15
+        assert len(X_train) == 70
+        assert len(X_val) == 15
+        assert len(X_test) == 15
     
-    def test_split_no_shuffle(self):
-        """Test that temporal order is preserved (no shuffling)."""
+    def test_split_maintains_order(self):
+        """Test split maintains temporal order."""
         X = np.arange(100).reshape(100, 1, 1)
         y = np.arange(100).reshape(100, 1)
         
-        splits = train_val_test_split(X, y, 0.7, 0.15, 0.15)
+        X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
+            X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15
+        )
         
-        # Training should have first 70 samples
-        assert splits['train'][0][0, 0, 0] == 0
-        assert splits['train'][0][-1, 0, 0] == 69
+        # Training should be first 70
+        assert X_train[0, 0, 0] == 0
+        assert X_train[-1, 0, 0] == 69
         
-        # Validation should have next 15 samples
-        assert splits['val'][0][0, 0, 0] == 70
+        # Validation should be next 15
+        assert X_val[0, 0, 0] == 70
         
-        # Test should have last 15 samples
-        assert splits['test'][0][-1, 0, 0] == 99
+        # Test should be last 15
+        assert X_test[0, 0, 0] == 85
     
     def test_split_invalid_ratios(self):
-        """Test that invalid ratios raise error."""
-        X = np.random.randn(100, 60, 1)
-        y = np.random.randn(100, 1)
+        """Test split raises error for invalid ratios."""
+        X = np.random.randn(100, 10, 5)
+        y = np.random.randn(100, 5)
         
-        with pytest.raises(AssertionError):
-            train_val_test_split(X, y, 0.5, 0.3, 0.3)  # Sum > 1
-
-
-class TestNormalizeFeatures:
-    """Test cases for normalize_features function."""
-    
-    def test_normalize_minmax(self):
-        """Test MinMaxScaler normalization."""
-        df = pd.DataFrame({
-            'Close': np.random.randn(100) * 100 + 200
-        })
-        
-        normalized, scaler = normalize_features(df, ['Close'], 'MinMaxScaler')
-        
-        assert normalized.min() >= 0
-        assert normalized.max() <= 1
-    
-    def test_normalize_standard(self):
-        """Test StandardScaler normalization."""
-        df = pd.DataFrame({
-            'Close': np.random.randn(100) * 100 + 200
-        })
-        
-        normalized, scaler = normalize_features(df, ['Close'], 'StandardScaler')
-        
-        # StandardScaler centers around 0 with std ~1
-        assert abs(normalized.mean()) < 0.1
-        assert abs(normalized.std() - 1) < 0.1
-    
-    def test_normalize_inverse(self):
-        """Test that inverse transform works correctly."""
-        df = pd.DataFrame({
-            'Close': np.array([100, 200, 300, 400, 500], dtype=np.float32)
-        })
-        
-        normalized, scaler = normalize_features(df, ['Close'], 'MinMaxScaler')
-        inversed = scaler.inverse_transform(normalized)
-        
-        np.testing.assert_array_almost_equal(inversed.flatten(), df['Close'].values, decimal=4)
+        with pytest.raises(ValueError):
+            train_val_test_split(X, y, train_ratio=0.5, val_ratio=0.3, test_ratio=0.3)

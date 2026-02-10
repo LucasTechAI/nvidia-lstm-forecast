@@ -1,123 +1,163 @@
 #!/bin/bash
-# =============================================================================
-# NVIDIA LSTM Forecast - Training Script
-# =============================================================================
-# Run model training with default or custom parameters
-# =============================================================================
+# Run model training with default parameters
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+echo "Starting LSTM model training..."
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  NVIDIA LSTM Stock Forecast - Training${NC}"
-echo -e "${GREEN}========================================${NC}"
+# Get the script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default parameters
-EPOCHS=${EPOCHS:-100}
-BATCH_SIZE=${BATCH_SIZE:-32}
-LEARNING_RATE=${LEARNING_RATE:-0.001}
-SEQUENCE_LENGTH=${SEQUENCE_LENGTH:-60}
-HIDDEN_SIZE=${HIDDEN_SIZE:-128}
-NUM_LAYERS=${NUM_LAYERS:-2}
-RUN_NAME=${RUN_NAME:-""}
+# Set environment variables
+export PYTHONPATH="${PYTHONPATH}:${PROJECT_ROOT}"
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --epochs)
-            EPOCHS="$2"
-            shift 2
-            ;;
-        --batch-size)
-            BATCH_SIZE="$2"
-            shift 2
-            ;;
-        --learning-rate)
-            LEARNING_RATE="$2"
-            shift 2
-            ;;
-        --sequence-length)
-            SEQUENCE_LENGTH="$2"
-            shift 2
-            ;;
-        --hidden-size)
-            HIDDEN_SIZE="$2"
-            shift 2
-            ;;
-        --num-layers)
-            NUM_LAYERS="$2"
-            shift 2
-            ;;
-        --run-name)
-            RUN_NAME="$2"
-            shift 2
-            ;;
-        --help)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --epochs          Number of training epochs (default: 100)"
-            echo "  --batch-size      Batch size (default: 32)"
-            echo "  --learning-rate   Learning rate (default: 0.001)"
-            echo "  --sequence-length Sequence length (default: 60)"
-            echo "  --hidden-size     LSTM hidden size (default: 128)"
-            echo "  --num-layers      Number of LSTM layers (default: 2)"
-            echo "  --run-name        MLflow run name (default: auto-generated)"
-            echo "  --help            Show this help message"
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Unknown option: $1${NC}"
-            exit 1
-            ;;
-    esac
-done
+# Run training script
+python3 -c "
+import logging
+import torch
+import mlflow
+from pathlib import Path
+import sys
 
-echo -e "${YELLOW}Training Parameters:${NC}"
-echo "  Epochs:          $EPOCHS"
-echo "  Batch Size:      $BATCH_SIZE"
-echo "  Learning Rate:   $LEARNING_RATE"
-echo "  Sequence Length: $SEQUENCE_LENGTH"
-echo "  Hidden Size:     $HIDDEN_SIZE"
-echo "  Num Layers:      $NUM_LAYERS"
-echo ""
+# Add src to path
+sys.path.insert(0, '${PROJECT_ROOT}')
 
-# Check if running in Docker
-if [ -f /.dockerenv ]; then
-    echo -e "${YELLOW}Running in Docker container${NC}"
-else
-    echo -e "${YELLOW}Running locally${NC}"
-    # Activate virtual environment if it exists
-    if [ -d "venv" ]; then
-        source venv/bin/activate
-    fi
-fi
+from src.config import settings
+from src.data.preprocessing import (
+    load_data_from_db,
+    normalize_features,
+    create_sequences,
+    train_val_test_split
+)
+from src.models.lstm_model import create_model
+from src.training.train import train_model, plot_training_history
 
-# Build command
-CMD="python -m src.training.train"
-CMD="$CMD --epochs $EPOCHS"
-CMD="$CMD --batch-size $BATCH_SIZE"
-CMD="$CMD --learning-rate $LEARNING_RATE"
-CMD="$CMD --sequence-length $SEQUENCE_LENGTH"
-CMD="$CMD --hidden-size $HIDDEN_SIZE"
-CMD="$CMD --num-layers $NUM_LAYERS"
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-if [ -n "$RUN_NAME" ]; then
-    CMD="$CMD --run-name $RUN_NAME"
-fi
+# Device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger.info(f'Using device: {device}')
 
-echo -e "${GREEN}Starting training...${NC}"
-echo "Command: $CMD"
-echo ""
+# Create directories
+Path(settings.model_dir).mkdir(parents=True, exist_ok=True)
+Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
+Path(settings.mlruns_dir).mkdir(parents=True, exist_ok=True)
 
-# Run training
-$CMD
+# Load data
+logger.info('Loading data...')
+df = load_data_from_db(
+    settings.database_path,
+    start_year=settings.data_start_year,
+    target_column=settings.target_column
+)
 
-echo ""
-echo -e "${GREEN}Training complete!${NC}"
-echo -e "${YELLOW}View results in MLflow UI: http://localhost:5000${NC}"
+# Prepare features
+feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+available_features = [col for col in feature_columns if col in df.columns]
+logger.info(f'Using features: {available_features}')
+
+# Normalize
+scaler_path = settings.model_dir / 'scaler.pkl'
+normalized_data, scaler = normalize_features(
+    df,
+    available_features,
+    scaler_path=str(scaler_path)
+)
+
+# Create sequences
+X, y = create_sequences(
+    normalized_data,
+    sequence_length=settings.sequence_length,
+    forecast_horizon=1
+)
+
+# Split data
+X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
+    X, y,
+    train_ratio=settings.train_split,
+    val_ratio=settings.val_split,
+    test_ratio=settings.test_split
+)
+
+# Create model
+input_size = X.shape[2]
+output_size = y.shape[1]
+
+model = create_model(
+    input_size=input_size,
+    hidden_size=settings.hidden_size,
+    num_layers=settings.num_layers,
+    dropout=settings.dropout,
+    bidirectional=settings.bidirectional,
+    output_size=output_size
+)
+model = model.to(device)
+
+# Setup MLflow
+mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+mlflow.set_experiment(settings.mlflow_experiment_name)
+
+# Training config
+config = {
+    'batch_size': settings.batch_size,
+    'learning_rate': settings.learning_rate,
+    'epochs': settings.epochs,
+    'early_stopping_patience': settings.early_stopping_patience,
+    'optimizer': settings.optimizer
+}
+
+# Start MLflow run
+with mlflow.start_run(run_name='lstm_training'):
+    # Log parameters
+    mlflow.log_params({
+        'input_size': input_size,
+        'hidden_size': settings.hidden_size,
+        'num_layers': settings.num_layers,
+        'dropout': settings.dropout,
+        'bidirectional': settings.bidirectional,
+        'sequence_length': settings.sequence_length,
+        'batch_size': settings.batch_size,
+        'learning_rate': settings.learning_rate,
+        'epochs': settings.epochs,
+        'optimizer': settings.optimizer
+    })
+    
+    # Train model
+    trained_model, history = train_model(
+        model=model,
+        train_data=(X_train, y_train),
+        val_data=(X_val, y_val),
+        config=config,
+        device=device,
+        mlflow_tracking=True
+    )
+    
+    # Save model
+    model_path = settings.model_dir / 'best_model.pth'
+    torch.save(trained_model.state_dict(), model_path)
+    logger.info(f'Saved model to {model_path}')
+    
+    # Log model to MLflow
+    mlflow.pytorch.log_model(trained_model, 'model')
+    
+    # Save and log training plots
+    plot_path = settings.output_dir / 'training_history.png'
+    plot_training_history(
+        history['train_loss'],
+        history['val_loss'],
+        save_path=str(plot_path)
+    )
+    mlflow.log_artifact(str(plot_path))
+    
+    # Log scaler
+    mlflow.log_artifact(str(scaler_path))
+    
+    logger.info('Training completed successfully!')
+    logger.info(f'Run ID: {mlflow.active_run().info.run_id}')
+
+"
+
+echo "Training completed!"

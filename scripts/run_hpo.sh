@@ -1,114 +1,114 @@
 #!/bin/bash
-# =============================================================================
-# NVIDIA LSTM Forecast - Hyperparameter Optimization Script
-# =============================================================================
-# Run Optuna hyperparameter search with MLflow tracking
-# =============================================================================
+# Run hyperparameter optimization
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+echo "Starting hyperparameter optimization..."
 
-echo -e "${GREEN}================================================${NC}"
-echo -e "${GREEN}  NVIDIA LSTM - Hyperparameter Optimization${NC}"
-echo -e "${GREEN}================================================${NC}"
+# Get the script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default parameters
-N_TRIALS=${N_TRIALS:-50}
-TIMEOUT=${TIMEOUT:-""}
-RUN_NAME=${RUN_NAME:-""}
-TRAIN_BEST=${TRAIN_BEST:-false}
+# Set environment variables
+export PYTHONPATH="${PYTHONPATH}:${PROJECT_ROOT}"
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --n-trials)
-            N_TRIALS="$2"
-            shift 2
-            ;;
-        --timeout)
-            TIMEOUT="$2"
-            shift 2
-            ;;
-        --run-name)
-            RUN_NAME="$2"
-            shift 2
-            ;;
-        --train-best)
-            TRAIN_BEST=true
-            shift
-            ;;
-        --help)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --n-trials    Number of Optuna trials (default: 50)"
-            echo "  --timeout     Timeout in seconds (default: none)"
-            echo "  --run-name    MLflow run name (default: auto-generated)"
-            echo "  --train-best  Train with best params after HPO"
-            echo "  --help        Show this help message"
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Unknown option: $1${NC}"
-            exit 1
-            ;;
-    esac
-done
+# Number of trials (can be overridden)
+N_TRIALS=${1:-20}
 
-echo -e "${YELLOW}HPO Parameters:${NC}"
-echo "  Number of Trials: $N_TRIALS"
-echo "  Timeout:          ${TIMEOUT:-none}"
-echo "  Train Best:       $TRAIN_BEST"
-echo ""
+echo "Running $N_TRIALS optimization trials..."
 
-echo -e "${YELLOW}Search Space:${NC}"
-echo "  hidden_size:     [32, 64, 128, 256]"
-echo "  num_layers:      [1, 2, 3, 4]"
-echo "  learning_rate:   [1e-5, 1e-2] (log scale)"
-echo "  dropout:         [0.1, 0.5]"
-echo "  sequence_length: [30, 60, 90, 120]"
-echo "  batch_size:      [16, 32, 64, 128]"
-echo ""
+# Run HPO script
+python3 -c "
+import logging
+import torch
+from pathlib import Path
+import sys
 
-# Check if running in Docker
-if [ -f /.dockerenv ]; then
-    echo -e "${YELLOW}Running in Docker container${NC}"
-else
-    echo -e "${YELLOW}Running locally${NC}"
-    if [ -d "venv" ]; then
-        source venv/bin/activate
-    fi
-fi
+# Add src to path
+sys.path.insert(0, '${PROJECT_ROOT}')
 
-# Build command
-CMD="python -m src.training.hyperparameter_search"
-CMD="$CMD --n-trials $N_TRIALS"
+from src.config import settings
+from src.data.preprocessing import (
+    load_data_from_db,
+    normalize_features,
+    create_sequences,
+    train_val_test_split
+)
+from src.training.hyperparameter_search import run_hyperparameter_search, save_study
 
-if [ -n "$TIMEOUT" ]; then
-    CMD="$CMD --timeout $TIMEOUT"
-fi
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-if [ -n "$RUN_NAME" ]; then
-    CMD="$CMD --run-name $RUN_NAME"
-fi
+# Device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger.info(f'Using device: {device}')
 
-if [ "$TRAIN_BEST" = true ]; then
-    CMD="$CMD --train-best"
-fi
+# Create directories
+Path(settings.model_dir).mkdir(parents=True, exist_ok=True)
+Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
+Path(settings.mlruns_dir).mkdir(parents=True, exist_ok=True)
 
-echo -e "${GREEN}Starting hyperparameter optimization...${NC}"
-echo "Command: $CMD"
-echo ""
+# Load data
+logger.info('Loading data...')
+df = load_data_from_db(
+    settings.database_path,
+    start_year=settings.data_start_year,
+    target_column=settings.target_column
+)
 
-# Run HPO
-$CMD
+# Prepare features
+feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+available_features = [col for col in feature_columns if col in df.columns]
+logger.info(f'Using features: {available_features}')
 
-echo ""
-echo -e "${GREEN}HPO complete!${NC}"
-echo -e "${YELLOW}View results in MLflow UI: http://localhost:5000${NC}"
-echo -e "${YELLOW}Optuna study saved to: data/models/optuna.db${NC}"
+# Normalize
+scaler_path = settings.model_dir / 'scaler.pkl'
+normalized_data, scaler = normalize_features(
+    df,
+    available_features,
+    scaler_path=str(scaler_path)
+)
+
+# Create sequences
+X, y = create_sequences(
+    normalized_data,
+    sequence_length=settings.sequence_length,
+    forecast_horizon=1
+)
+
+# Split data
+X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
+    X, y,
+    train_ratio=settings.train_split,
+    val_ratio=settings.val_split,
+    test_ratio=settings.test_split
+)
+
+input_size = X.shape[2]
+output_size = y.shape[1]
+
+# Run hyperparameter search
+logger.info('Starting hyperparameter optimization...')
+study, best_params = run_hyperparameter_search(
+    train_data=(X_train, y_train),
+    val_data=(X_val, y_val),
+    input_size=input_size,
+    output_size=output_size,
+    n_trials=$N_TRIALS,
+    device=device,
+    mlflow_tracking_uri=settings.mlflow_tracking_uri,
+    experiment_name=settings.mlflow_experiment_name,
+    study_name='nvidia_lstm_hpo'
+)
+
+# Save study
+study_path = settings.output_dir / 'optuna_study.pkl'
+save_study(study, str(study_path))
+
+logger.info('Hyperparameter optimization completed!')
+logger.info(f'Best parameters: {best_params}')
+
+"
+
+echo "Hyperparameter optimization completed!"

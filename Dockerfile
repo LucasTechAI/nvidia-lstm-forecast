@@ -1,9 +1,10 @@
-# =============================================================================
-# Dockerfile for NVIDIA LSTM Stock Forecast
-# Multi-stage build for production-ready container
-# =============================================================================
+# Dockerfile for nvidia-lstm-forecast
+# Python 3.10 slim image for PyTorch compatibility
 
-FROM python:3.10-slim AS base
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -12,15 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app
 
-# Set working directory
-WORKDIR /app
-
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    libgomp1 \
-    curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
@@ -147,11 +144,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data/raw data/models/checkpoints data/outputs data/mlruns logs
+RUN mkdir -p data logs models mlruns outputs
 
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Expose MLflow port
+EXPOSE 5000
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

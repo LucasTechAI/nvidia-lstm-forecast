@@ -1,125 +1,150 @@
 #!/bin/bash
-# =============================================================================
-# NVIDIA LSTM Forecast - Prediction Script
-# =============================================================================
-# Generate stock price forecasts using trained model
-# =============================================================================
+# Generate predictions with the best model
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+echo "Generating predictions..."
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  NVIDIA LSTM - Stock Price Forecast${NC}"
-echo -e "${GREEN}========================================${NC}"
+# Get the script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default parameters
-HORIZON=${HORIZON:-30}
-RUN_ID=${RUN_ID:-""}
-CHECKPOINT=${CHECKPOINT:-""}
-SCALER=${SCALER:-""}
-NO_UNCERTAINTY=${NO_UNCERTAINTY:-false}
-NO_SAVE=${NO_SAVE:-false}
+# Set environment variables
+export PYTHONPATH="${PYTHONPATH}:${PROJECT_ROOT}"
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --horizon)
-            HORIZON="$2"
-            shift 2
-            ;;
-        --run-id)
-            RUN_ID="$2"
-            shift 2
-            ;;
-        --checkpoint)
-            CHECKPOINT="$2"
-            shift 2
-            ;;
-        --scaler)
-            SCALER="$2"
-            shift 2
-            ;;
-        --no-uncertainty)
-            NO_UNCERTAINTY=true
-            shift
-            ;;
-        --no-save)
-            NO_SAVE=true
-            shift
-            ;;
-        --help)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --horizon        Forecast horizon in days (default: 30)"
-            echo "  --run-id         MLflow run ID to load model from"
-            echo "  --checkpoint     Path to model checkpoint file"
-            echo "  --scaler         Path to scaler file"
-            echo "  --no-uncertainty Disable uncertainty estimation"
-            echo "  --no-save        Do not save results to files"
-            echo "  --help           Show this help message"
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Unknown option: $1${NC}"
-            exit 1
-            ;;
-    esac
-done
+# MLflow run ID (should be provided as argument)
+RUN_ID=${1:-""}
 
-echo -e "${YELLOW}Prediction Parameters:${NC}"
-echo "  Forecast Horizon: $HORIZON days"
-echo "  MLflow Run ID:    ${RUN_ID:-auto-detect}"
-echo "  Checkpoint:       ${CHECKPOINT:-auto-detect}"
-echo "  Uncertainty:      $([ "$NO_UNCERTAINTY" = true ] && echo "disabled" || echo "enabled")"
-echo ""
-
-# Check if running in Docker
-if [ -f /.dockerenv ]; then
-    echo -e "${YELLOW}Running in Docker container${NC}"
-else
-    echo -e "${YELLOW}Running locally${NC}"
-    if [ -d "venv" ]; then
-        source venv/bin/activate
-    fi
+if [ -z "$RUN_ID" ]; then
+    echo "Usage: ./run_prediction.sh <mlflow_run_id>"
+    echo "Please provide the MLflow run ID of the trained model"
+    exit 1
 fi
 
-# Build command
-CMD="python -m src.prediction.predict"
-CMD="$CMD --horizon $HORIZON"
+echo "Using MLflow run ID: $RUN_ID"
 
-if [ -n "$RUN_ID" ]; then
-    CMD="$CMD --run-id $RUN_ID"
-fi
+# Run prediction script
+python3 -c "
+import logging
+import torch
+import pandas as pd
+from pathlib import Path
+from datetime import timedelta
+import sys
 
-if [ -n "$CHECKPOINT" ]; then
-    CMD="$CMD --checkpoint $CHECKPOINT"
-fi
+# Add src to path
+sys.path.insert(0, '${PROJECT_ROOT}')
 
-if [ -n "$SCALER" ]; then
-    CMD="$CMD --scaler $SCALER"
-fi
+from src.config import settings
+from src.data.preprocessing import load_data_from_db, normalize_features, load_scaler
+from src.prediction.predict import (
+    load_best_model,
+    generate_forecast,
+    inverse_transform_predictions,
+    plot_predictions,
+    save_predictions_to_csv
+)
 
-if [ "$NO_UNCERTAINTY" = true ]; then
-    CMD="$CMD --no-uncertainty"
-fi
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-if [ "$NO_SAVE" = true ]; then
-    CMD="$CMD --no-save"
-fi
+# Device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger.info(f'Using device: {device}')
 
-echo -e "${GREEN}Generating forecast...${NC}"
-echo "Command: $CMD"
-echo ""
+# Create output directory
+Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 
-# Run prediction
-$CMD
+# Load historical data
+logger.info('Loading historical data...')
+df = load_data_from_db(
+    settings.database_path,
+    start_year=settings.data_start_year,
+    target_column=settings.target_column
+)
 
-echo ""
-echo -e "${GREEN}Forecast complete!${NC}"
-echo -e "${YELLOW}Results saved to: data/outputs/predictions/${NC}"
+# Prepare features
+feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+available_features = [col for col in feature_columns if col in df.columns]
+
+# Load scaler
+scaler_path = settings.model_dir / 'scaler.pkl'
+scaler = load_scaler(str(scaler_path))
+
+# Normalize last sequence
+normalized_data, _ = normalize_features(df, available_features)
+last_sequence = normalized_data[-settings.sequence_length:]
+
+# Load model
+logger.info('Loading model from MLflow...')
+model = load_best_model(
+    mlflow_run_id='$RUN_ID',
+    mlflow_tracking_uri=settings.mlflow_tracking_uri,
+    device=device
+)
+
+# Generate forecast
+logger.info(f'Generating {settings.forecast_horizon}-day forecast...')
+forecast_normalized = generate_forecast(
+    model=model,
+    last_sequence=last_sequence,
+    horizon=settings.forecast_horizon,
+    device=device
+)
+
+# Inverse transform
+forecast = inverse_transform_predictions(
+    forecast_normalized,
+    str(scaler_path)
+)
+
+# Create forecast dates
+last_date = df['Date'].iloc[-1]
+forecast_dates = pd.date_range(
+    start=last_date + timedelta(days=1),
+    periods=settings.forecast_horizon,
+    freq='D'
+)
+
+# Save predictions
+csv_path = settings.output_dir / 'forecast.csv'
+save_predictions_to_csv(
+    forecast,
+    forecast_dates,
+    str(csv_path),
+    column_names=available_features
+)
+
+# Plot predictions
+plot_path = settings.output_dir / 'forecast_plot.png'
+
+# Extract close price for plotting
+close_idx = available_features.index(settings.target_column)
+forecast_close = forecast[:, close_idx]
+
+plot_predictions(
+    historical_data=df,
+    forecast_data=forecast_close,
+    forecast_dates=forecast_dates,
+    target_column=settings.target_column,
+    save_path=str(plot_path),
+    show_last_n_days=180
+)
+
+logger.info('Prediction completed successfully!')
+logger.info(f'Forecast saved to {csv_path}')
+logger.info(f'Plot saved to {plot_path}')
+
+# Print forecast summary
+print('\nForecast Summary:')
+print(f'Horizon: {settings.forecast_horizon} days')
+print(f'First prediction: {forecast_close[0]:.2f}')
+print(f'Last prediction: {forecast_close[-1]:.2f}')
+print(f'Mean prediction: {forecast_close.mean():.2f}')
+print(f'Min prediction: {forecast_close.min():.2f}')
+print(f'Max prediction: {forecast_close.max():.2f}')
+
+"
+
+echo "Prediction completed!"

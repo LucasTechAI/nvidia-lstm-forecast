@@ -40,30 +40,47 @@ venv.bak/
 # VS Code
 .vscode/
 
-# Data files
+# Data files (but not src/data directory)
 *.csv
 *.h5
 *.hdf5
-*.pkl
-*.pickle
+data/*.db
+data/*.sqlite
+data/*.csv
+data/raw/
+data/processed/
+datasets/
 
-# Keep data directory structure but ignore large files
-data/models/
-data/outputs/
-data/mlruns/
-!data/raw/
-!data/nvidia_stock.db
-
-# Model files
+# Model artifacts (but not src/models directory)
 *.pth
 *.pt
 *.ckpt
+*.pkl
+*.pickle
+models/*.pth
+models/*.pt
+models/*.pkl
+checkpoints/
 
 # Logs
 *.log
 logs/
 tensorboard/
 runs/
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Optuna
+optuna.db
+*.db-journal
+
+# Outputs
+outputs/
+*.png
+*.jpg
+*.jpeg
 
 # OS
 .DS_Store
