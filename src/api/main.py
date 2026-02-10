@@ -43,22 +43,27 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application
 app = FastAPI(
     title="NVIDIA Stock Prediction API",
-    description="""
-    REST API for NVIDIA stock price prediction using LSTM neural networks.
-    
-    ## Features
-    
-    * **Prediction**: Generate stock price forecasts with confidence intervals
-    * **Inference**: Run predictions on custom input sequences
-    * **Training**: Train or retrain the LSTM model
-    * **Data**: Access historical stock data
-    * **Health**: Monitor API and model status
-    
-    ## Model
-    
-    Uses a bidirectional LSTM trained on NVIDIA historical stock prices
-    with Monte Carlo Dropout for uncertainty estimation.
-    """,
+    description="""REST API for NVIDIA stock price prediction using LSTM neural networks.
+
+## Features
+
+- **Prediction**: Generate stock price forecasts with confidence intervals
+- **Inference**: Run predictions on custom input sequences
+- **Training**: Train or retrain the LSTM model
+- **Data**: Access historical stock data
+- **Health**: Monitor API and model status
+
+## Model
+
+Uses a bidirectional LSTM trained on NVIDIA historical stock prices
+with Monte Carlo Dropout for uncertainty estimation.
+
+## Usage
+
+1. Check API health: `GET /health`
+2. Get predictions: `POST /predict`
+3. Access data: `GET /data/historical`
+""",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
