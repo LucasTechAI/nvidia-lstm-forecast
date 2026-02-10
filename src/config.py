@@ -8,6 +8,8 @@ values, paths, and settings used throughout the application.
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,12 +24,20 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 # Key directories
 DATA_DIR = ROOT_DIR / "data"
+MODELS_DIR = DATA_DIR / "models"
+LOGS_DIR = ROOT_DIR / "logs"
+OUTPUTS_DIR = DATA_DIR / "outputs"
+MLRUNS_DIR = DATA_DIR / "mlruns"
+
+# Ensure directories exist
+for directory in [DATA_DIR, MODELS_DIR, LOGS_DIR, OUTPUTS_DIR, MLRUNS_DIR]:
+    directory.mkdir(parents=True, exist_ok=True)
 
 # ============================================================================
 # Database Configuration
 # ============================================================================
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(ROOT_DIR / "data" / "nvidia.db"))
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(ROOT_DIR / "data" / "nvidia_stock.db"))
 
 
 # ============================================================================
@@ -92,6 +102,97 @@ MLRUNS_DIR = ROOT_DIR / "mlruns"
 # Settings Class (Pydantic-style for validation)
 # ============================================================================
 
+@dataclass
+class MLflowConfig:
+    """Configuration for MLflow experiment tracking."""
+    
+    # Tracking server - use SQLite database backend (filesystem backend deprecated Feb 2026)
+    tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{MLRUNS_DIR}/mlflow.db")
+    
+    # Experiment settings
+    experiment_name: str = "nvidia-lstm-forecast"
+    
+    # Artifact storage
+    artifact_location: Optional[str] = os.getenv("MLFLOW_ARTIFACT_ROOT", str(MLRUNS_DIR / "artifacts"))
+    
+    # Run settings
+    run_name_prefix: str = "lstm_run"
+    
+    # Logging settings
+    log_models: bool = True
+    log_artifacts: bool = True
+    log_system_metrics: bool = True
+    
+    # Model registry
+    registered_model_name: str = "nvidia-lstm-model"
+
+
+# ============================================================================
+# Hyperparameter Optimization Configuration
+# ============================================================================
+
+@dataclass
+class HPOConfig:
+    """Configuration for hyperparameter optimization with Optuna."""
+    
+    # Study settings
+    study_name: str = "nvidia-lstm-hpo"
+    n_trials: int = 50
+    timeout: Optional[int] = None  # Timeout in seconds
+    
+    # Optimization direction
+    direction: str = "minimize"  # Minimize validation RMSE
+    metric: str = "val_rmse"
+    
+    # Search space bounds
+    num_layers_range: tuple = (1, 4)
+    hidden_size_choices: List[int] = field(default_factory=lambda: [32, 64, 128, 256])
+    learning_rate_range: tuple = (1e-5, 1e-2)  # Log scale
+    dropout_range: tuple = (0.1, 0.5)
+    sequence_length_choices: List[int] = field(default_factory=lambda: [30, 60, 90, 120])
+    batch_size_choices: List[int] = field(default_factory=lambda: [16, 32, 64, 128])
+    
+    # Optuna sampler and pruner
+    sampler: str = "TPE"  # Options: "TPE", "CMA-ES", "Random"
+    pruner: str = "MedianPruner"  # Options: "MedianPruner", "HyperbandPruner", "None"
+    
+    # Storage
+    storage: Optional[str] = field(default_factory=lambda: f"sqlite:///{MODELS_DIR}/optuna.db")
+    
+    # Parallelization
+    n_jobs: int = 1  # Number of parallel trials
+
+
+# ============================================================================
+# Prediction Configuration
+# ============================================================================
+
+@dataclass
+class PredictionConfig:
+    """Configuration for model inference and forecasting."""
+    
+    # Forecast horizon
+    forecast_horizon: int = 30  # Days to predict ahead
+    
+    # Confidence intervals (for uncertainty estimation)
+    confidence_level: float = 0.95
+    n_samples: int = 100  # Monte Carlo samples for uncertainty
+    
+    # Output settings
+    output_dir: Path = field(default_factory=lambda: OUTPUTS_DIR / "predictions")
+    save_format: str = "csv"  # Options: "csv", "json", "parquet"
+    
+    # Visualization
+    plot_predictions: bool = True
+    plot_format: str = "png"  # Options: "png", "svg", "pdf"
+    figsize: tuple = (14, 7)
+
+
+# ============================================================================
+# Settings Class (Aggregated Configuration)
+# ============================================================================
+
+@dataclass
 class Settings:
     """
     Application settings container.
@@ -154,6 +255,13 @@ class Settings:
     def from_env(cls) -> "Settings":
         """Create settings instance from environment variables."""
         return cls()
+    
+    def get_device(self) -> str:
+        """Get the appropriate device (cuda/cpu) based on configuration and availability."""
+        import torch
+        if self.training.device == "auto":
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        return self.training.device
 
 
 # Singleton instance

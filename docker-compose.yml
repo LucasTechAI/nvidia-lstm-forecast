@@ -1,3 +1,15 @@
+# =============================================================================
+# Docker Compose for NVIDIA LSTM Stock Forecast
+# =============================================================================
+# Services:
+#   - mlflow: MLflow tracking server (UI on port 5000)
+#   - training: Model training service
+#   - hpo: Hyperparameter optimization service
+#   - prediction: Forecast generation service
+#   - etl: Data extraction service (original)
+#   - dev: Development environment
+# =============================================================================
+
 services:
   # MLflow tracking server
   mlflow:
@@ -20,12 +32,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: production
     container_name: nvidia-lstm-etl
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      - DATABASE_PATH=/app/data/nvidia.db
+      - DATABASE_PATH=/app/data/nvidia_stock.db
       - LOG_LEVEL=INFO
     command: ["python", "setup/run_etl_nvidia.py"]
     network_mode: bridge
@@ -58,6 +71,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: development
     container_name: nvidia-lstm-dev
     volumes:
       - ./data:/app/data
@@ -66,11 +80,11 @@ services:
       - ./mlruns:/app/mlruns
       - ./outputs:/app/outputs
       - ./src:/app/src
-      - ./setup:/app/setup
       - ./tests:/app/tests
       - ./scripts:/app/scripts
     environment:
-      - DATABASE_PATH=/app/data/nvidia.db
+      - DATABASE_PATH=/app/data/nvidia_stock.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
       - LOG_LEVEL=DEBUG
       - MLFLOW_TRACKING_URI=/app/mlruns
       - PYTHONPATH=/app
@@ -79,3 +93,17 @@ services:
     tty: true
     profiles:
       - dev
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  lstm-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes (Optional: for persistent data)
+# =============================================================================
+volumes:
+  mlruns-data:
+  model-data:
